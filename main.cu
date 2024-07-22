@@ -8,14 +8,17 @@
 #include<glad/glad.h>
 #include<GLFW/glfw3.h>
 
+#include "Video.cuh"
+#include "Frame.cuh"
 #include "auxiliaryFunc.cuh"
-#include "Video.h"
+#include "processingFunc.cuh"
 
 using namespace cv;
 using std::cout;
 using std::endl;
 
 const string path = "C:\\Users\\thoma\\source\\repos\\Video-Rendering-Application\\Videos\\Rubix.avi";
+
 
 VideoCapture capture(path);
 Mat frame;
@@ -32,7 +35,8 @@ int main(int argc, char** argv) {
 	Video V(frame);
 
 	namedWindow("Video Input", 1);
-    while (true) {
+	bool first = true;
+    while (first) {
 
 		capture >> frame;
 		
@@ -42,12 +46,16 @@ int main(int argc, char** argv) {
 		imshow("Video Input", frame);
 		
 		V.updateSequence(frame);
-		cout << V.getFrame(V.FRAME_COUNT - 1) << endl;
+		Frame* current = new Frame(frame);
+
+		Vec3b color = frame.at<Vec3b>(Point(550, 550));
+		cout << color << endl;
+		
 
         // Press 'q' to exit the loop
         if (waitKey(30) >= 0)
             break;
-		
+		first = false;
     }
 	waitKey(0);
 	capture.release();
