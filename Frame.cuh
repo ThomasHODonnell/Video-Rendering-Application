@@ -13,7 +13,7 @@ class Frame {
 		vector <vector<int>> vertList;
 
 		Frame(Mat frame);
-		void fillLists(Vec3b firstPixel, pair<int,int> coord);
+		void processFrame(Vec3b firstPixel);
 		void printLists(); 
 };
 
