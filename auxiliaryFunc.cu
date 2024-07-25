@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <iostream>
 
-#include "Video.h"
+#include "Video.cuh"
 
 using namespace cv;
 using namespace std;

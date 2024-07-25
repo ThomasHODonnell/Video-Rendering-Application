@@ -23,6 +23,8 @@ const string path = "C:\\Users\\thoma\\source\\repos\\Video-Rendering-Applicatio
 VideoCapture capture(path);
 Mat frame;
 
+__global__ void testK() {};
+
 int main(int argc, char** argv) { 
 	
 	if (!capture.isOpened()) {
@@ -47,10 +49,6 @@ int main(int argc, char** argv) {
 		
 		V.updateSequence(frame);
 		Frame* current = new Frame(frame);
-
-		Vec3b color = frame.at<Vec3b>(Point(550, 550));
-		cout << color << endl;
-		
 
         // Press 'q' to exit the loop
         if (waitKey(30) >= 0)

@@ -4,7 +4,7 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "Video.h"
+#include "Video.cuh"
 
 using namespace cv;
 using namespace std;
