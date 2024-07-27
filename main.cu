@@ -46,13 +46,14 @@ int main(int argc, char** argv) {
             break;
 
 		imshow("Video Input", frame);
-		
-		V.updateSequence(frame);
-		Frame* current = new Frame(frame);
 
         // Press 'q' to exit the loop
         if (waitKey(30) >= 0)
             break;
+
+		V.updateSequence(frame);
+		Frame* current = new Frame(frame);
+
 		first = false;
     }
 	waitKey(0);
