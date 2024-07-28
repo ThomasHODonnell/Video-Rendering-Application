@@ -32,7 +32,7 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 	for (int j = -1; j <= 1; j++) {
 		for (int k = -1; k <= 1; k++) {
 			if (j == 0 && k == 0) continue;
-			int neighborIdx = i + 3 * (j * width + k); // Calculate the neighbor index
+			int neighborIdx = i + 3 * (j * width + k);
 			if (neighborIdx >= 0 && neighborIdx < width * height * 3)
 				if (abs(in[neighborIdx] - in[i]) >= 50 ||
 					abs(in[neighborIdx + 1] - in[i + 1]) >= 50 ||
@@ -41,40 +41,76 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 		}
 	}
 }
+__global__ void findVerts(int* in, int* out, int size, int width, int height) {
+	const int errorY = 2, errorX = 2;
+	const int i = 2 * (blockIdx.x * blockDim.x + threadIdx.x); // xCoord
+	if (i >= size) return; // size is likely not divisor of gridsize
+	if (i == 0) if (abs(in[i+1] - in[i+3]) > errorY) return; // drop isolated points if anyc
+	if (i == size) 	if (abs(in[i-2] - in[i]) > errorY) return;
+	else if (abs(in[i+1] - in[i+3]) > errorY || abs(in[i - 2] - in[i]) > errorY) return;
+	// run binary search for point on X
+	int left = 1, right = size - 1, mid;
+	while (left <= right) {
+		mid = (left + right) / 2; // xCoord 
+		if (abs(in[mid] - in[i + 1]) < errorX) { out[i] = in[mid]; out[i + 1] = in[mid + 1]; }
+		if (in[mid] < in[i + 1]) left = mid + 1;
+		else right = mid - 1;
+	}
+}
 void Frame::processFrame(Mat frame) {
 	Vec3b data;
-	int* in = 0;
-	int* out = 0;
+	int* inPL = 0;
+	int* outPL = 0;
 
-	cudaError_t inMalErr = cudaMallocManaged(&in, 3 * N * sizeof(int));
-	if (inMalErr != cudaSuccess) { printf("Input Array Malloc Error: code %d - %s.\n", cudaError(inMalErr), cudaGetErrorString(inMalErr)); return; }
-	cudaError_t outMalErr = cudaMalloc(&out, 3 * N * sizeof(int));
-	if (outMalErr != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErr), cudaGetErrorString(outMalErr)); return; }
+	cudaError_t inMalErrPL = cudaMallocManaged(&inPL, 3 * N * sizeof(int));
+	if (inMalErrPL != cudaSuccess) { printf("Input Array Malloc Error: code %d - %s.\n", cudaError(inMalErrPL), cudaGetErrorString(inMalErrPL)); return; }
+	cudaError_t outMalErrPL = cudaMalloc(&outPL, 3 * N * sizeof(int));
+	if (outMalErrPL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrPL), cudaGetErrorString(outMalErrPL)); return; }
+	cudaMemset(outPL, 0, 3 * N * sizeof(int));
 
 	for (int i = 0; i < N; i += 3) {
 		data = frame.at<Vec3b>(Point(i % 1080, i / 1080));
 		for (int j = 0; j < 3; j++) 
-			in[i + j] = static_cast<int>(data[j]);
+			inPL[i + j] = static_cast<int>(data[j]);
 	}
 	
-	findPoints<<<dimGrid, dimBlock>>>(in, out, frame.cols, frame.rows);
+	findPoints<<<dimGrid, dimBlock>>>(inPL, outPL, frame.cols, frame.rows);
 
-	int* hostOut = (int*)calloc(3 * N, sizeof(int));
-	cudaMemcpy(hostOut, out, N * sizeof(int), cudaMemcpyDeviceToHost);
+	int* hostOutPL = (int*)calloc(3 * N, sizeof(int));
+	cudaMemcpy(hostOutPL, outPL, N * sizeof(int), cudaMemcpyDeviceToHost);
 
 	cudaError_t syncErr = cudaGetLastError();
 	cudaError_t asyncErr = cudaDeviceSynchronize();
 	if (syncErr != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErr), cudaGetErrorString(syncErr)); throw invalid_argument("Sync Kernel Error"); }
 	if (asyncErr != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErr), cudaGetErrorString(asyncErr)); throw invalid_argument("Sync Kernel Error"); }
 
-	for (int i = 0; i < 3*N; i++) {
-		if (hostOut[i] != 0) pointList.push_back(hostOut[i]);
-	}
+	for (int i = 0; i < 3*N; i++) if (hostOutPL[i] != 0) pointList.push_back(hostOutPL[i]);
+	
+	cudaFree(inPL);
+	cudaFree(outPL);
 
-	cudaFree(in);
-	cudaFree(out);
+	int* inVL = 0;
+	int* outVL = 0;
 
-	printLists();
+	cudaError_t inMalErrVL = cudaMallocManaged(&inVL, pointList.size());
+	if (inMalErrVL != cudaSuccess) { printf("Input Array Malloc Error: code %d - %s.\n", cudaError(inMalErrVL), cudaGetErrorString(inMalErrVL)); return; }
+	cudaError_t outMalErrVL = cudaMalloc(&outVL, pointList.size());
+	if (outMalErrVL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrVL), cudaGetErrorString(outMalErrVL)); return; }
+	cudaMemset(outVL, 0, pointList.size() * sizeof(int));
+
+	for (int i = 0; i < pointList.size(); i++) inVL[i] = pointList.at(i);
+
+	findVerts << <(pointList.size() + TPB - 1) / TPB, TPB>> > (inVL, outVL, pointList.size(), frame.cols, frame.rows);
+
+	int* hostOutVL = (int*)calloc(pointList.size(), sizeof(int));
+	cudaMemcpy(hostOutVL, outVL, pointList.size() * sizeof(int), cudaMemcpyDeviceToHost);
+
+	for (int i = 0; i < pointList.size(); i++) if (hostOutPL[i] != 0) vertList.push_back(hostOutVL[i]);
+
+	cudaFree(inVL);
+	cudaFree(outVL);
+	
+	printLists(); 
 }
 void Frame::printLists() {
 	cout << "----------------------------------------------------------------------------------------------\n";
@@ -87,13 +123,10 @@ void Frame::printLists() {
 	}
 	cout << "}\n----------------------------------------------------------------------------------------------\n";
 	cout << "VERTICE LIST:\n{ ";
-	for (int i = 0; i < vertList.size(); i++) {
+	for (int i = 0; i < vertList.size(); i += 2) {
 		if (i != 0) cout << ", ";
 		cout << "(";
-		for (int j = 0; j < vertList[i].size(); j++) {
-			cout << vertList[i][j];
-			if (j < vertList[i].size() - 1) cout << ", ";
-		}
+		cout << vertList.at(i) % 1080 << ", " << vertList[i + 1] / 1080;
 		cout << ")";
 	}
 	cout << "}\n----------------------------------------------------------------------------------------------\n";

@@ -11,7 +11,7 @@ using namespace std;
 class Frame {
 	public:
 		vector <int> pointList;
-		vector <vector<int>> vertList;
+		vector <int> vertList;
 
 		Frame(Mat frame);
 		void processFrame(Mat frame);
