@@ -44,16 +44,19 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 __global__ void findVerts(int* in, int* out, int size, int width, int height) {
 	const int errorY = 2, errorX = 2;
 	const int i = 2 * (blockIdx.x * blockDim.x + threadIdx.x); // xCoord
-	if (i >= size) return; // size is likely not divisor of gridsize
-	if (i == 0) if (abs(in[i+1] - in[i+3]) > errorY) return; // drop isolated points if anyc
-	if (i == size) 	if (abs(in[i-2] - in[i]) > errorY) return;
-	else if (abs(in[i+1] - in[i+3]) > errorY || abs(in[i - 2] - in[i]) > errorY) return;
+	if (i > size) return;
+	if (i == 0) if (abs(in[i + 1] - in[i + 3]) > errorY) return; // drop isolated points if any
+	if (i == size - 2) if (abs(in[i-1] - in[i+1]) > errorY) return;
+	else if (abs(in[i+1] - in[i+3])>errorY || abs(in[i-1] - in[i+1]) > errorY) return;
 	// run binary search for point on X
-	int left = 1, right = size - 1, mid;
+	int left = 0, right = size - 2, mid;
 	while (left <= right) {
 		mid = (left + right) / 2; // xCoord 
-		if (abs(in[mid] - in[i + 1]) < errorX) { out[i] = in[mid]; out[i + 1] = in[mid + 1]; }
-		if (in[mid] < in[i + 1]) left = mid + 1;
+		if (abs(in[mid] - in[i]) < errorX) {
+				out[i] = in[mid];
+				out[i + 1] = in[mid + 1];
+		}
+		if (in[mid] < in[i]) left = mid + 1;
 		else right = mid - 1;
 	}
 }
@@ -68,7 +71,7 @@ void Frame::processFrame(Mat frame) {
 	if (outMalErrPL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrPL), cudaGetErrorString(outMalErrPL)); return; }
 	cudaMemset(outPL, 0, 3 * N * sizeof(int));
 
-	for (int i = 0; i < N; i += 3) {
+	for (int i = 0; i < N; i += 3) { // can this be done faster??
 		data = frame.at<Vec3b>(Point(i % 1080, i / 1080));
 		for (int j = 0; j < 3; j++) 
 			inPL[i + j] = static_cast<int>(data[j]);
@@ -79,10 +82,10 @@ void Frame::processFrame(Mat frame) {
 	int* hostOutPL = (int*)calloc(3 * N, sizeof(int));
 	cudaMemcpy(hostOutPL, outPL, N * sizeof(int), cudaMemcpyDeviceToHost);
 
-	cudaError_t syncErr = cudaGetLastError();
-	cudaError_t asyncErr = cudaDeviceSynchronize();
-	if (syncErr != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErr), cudaGetErrorString(syncErr)); throw invalid_argument("Sync Kernel Error"); }
-	if (asyncErr != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErr), cudaGetErrorString(asyncErr)); throw invalid_argument("Sync Kernel Error"); }
+	cudaError_t syncErrPL = cudaGetLastError();
+	cudaError_t asyncErrPL = cudaDeviceSynchronize();
+	if (syncErrPL != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrPL), cudaGetErrorString(syncErrPL)); throw invalid_argument("Sync Kernel Error"); }
+	if (asyncErrPL != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrPL), cudaGetErrorString(asyncErrPL)); throw invalid_argument("Async Kernel Error"); }
 
 	for (int i = 0; i < 3*N; i++) if (hostOutPL[i] != 0) pointList.push_back(hostOutPL[i]);
 	
@@ -92,20 +95,26 @@ void Frame::processFrame(Mat frame) {
 	int* inVL = 0;
 	int* outVL = 0;
 
-	cudaError_t inMalErrVL = cudaMallocManaged(&inVL, pointList.size());
+	cudaError_t inMalErrVL = cudaMallocManaged(&inVL, pointList.size() * sizeof(int));
 	if (inMalErrVL != cudaSuccess) { printf("Input Array Malloc Error: code %d - %s.\n", cudaError(inMalErrVL), cudaGetErrorString(inMalErrVL)); return; }
-	cudaError_t outMalErrVL = cudaMalloc(&outVL, pointList.size());
+	cudaError_t outMalErrVL = cudaMalloc(&outVL, pointList.size() * sizeof(int));
 	if (outMalErrVL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrVL), cudaGetErrorString(outMalErrVL)); return; }
-	cudaMemset(outVL, 0, pointList.size() * sizeof(int));
+	cudaMemset(outVL, 0, pointList.size() * sizeof(int)); // overwrite inVL to prevent this O(n) copy? 
 
-	for (int i = 0; i < pointList.size(); i++) inVL[i] = pointList.at(i);
+	//change pointlist vect to thrust::device_vector to prevent this copy? 
+	for (int i = 0; i < pointList.size(); i++) inVL[i] = pointList.at(i); // O(n)
 
-	findVerts << <(pointList.size() + TPB - 1) / TPB, TPB>> > (inVL, outVL, pointList.size(), frame.cols, frame.rows);
+	findVerts << <(pointList.size() + 32 - 1) / 32, 32 >> > (inVL, outVL, pointList.size(), frame.cols, frame.rows);
 
 	int* hostOutVL = (int*)calloc(pointList.size(), sizeof(int));
 	cudaMemcpy(hostOutVL, outVL, pointList.size() * sizeof(int), cudaMemcpyDeviceToHost);
 
-	for (int i = 0; i < pointList.size(); i++) if (hostOutPL[i] != 0) vertList.push_back(hostOutVL[i]);
+	cudaError_t syncErrVL = cudaGetLastError();
+	cudaError_t asyncErrVL = cudaDeviceSynchronize();
+ 	if (syncErrVL != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrVL), cudaGetErrorString(syncErrVL)); throw invalid_argument("Sync Kernel Error"); }
+	if (asyncErrVL != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrVL), cudaGetErrorString(asyncErrVL)); throw invalid_argument("Async Kernel Error"); }
+
+	for (int i = 0; i < pointList.size(); i++) if (hostOutVL[i] != 0) vertList.push_back(hostOutVL[i]);
 
 	cudaFree(inVL);
 	cudaFree(outVL);
@@ -114,7 +123,7 @@ void Frame::processFrame(Mat frame) {
 }
 void Frame::printLists() {
 	cout << "----------------------------------------------------------------------------------------------\n";
-	cout << "POINT LIST:\n{ ";
+	cout << "POINT LIST: " << pointList.size() << " elements\n{";
 	for (int i = 0; i < pointList.size(); i+=2) {
 		if (i != 0) cout << ", ";
 		cout << "(";
@@ -122,7 +131,7 @@ void Frame::printLists() {
 		cout << ")";
 	}
 	cout << "}\n----------------------------------------------------------------------------------------------\n";
-	cout << "VERTICE LIST:\n{ ";
+	cout << "VERTICE LIST: " << vertList.size() << " elements\n{";
 	for (int i = 0; i < vertList.size(); i += 2) {
 		if (i != 0) cout << ", ";
 		cout << "(";
