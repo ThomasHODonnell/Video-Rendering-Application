@@ -41,23 +41,34 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 		}
 	}
 }
+__device__ int binarySearch(int* in, int left, int right, int errorX, int errorY, int refX, int refY) {
+	if (right >= left) {
+		int mid = ((left + right) / 2);
+		if (mid % 2 == 0 && mid != right) mid++; // yCoord
+		if (abs(in[mid] - refY) < errorY && abs(in[mid - 1] - refX) < errorX) {
+			printf("INSIDE\n");
+			printf("midY:%d, midX:%d, inY:%d, inX:%d\n", in[mid], in[mid - 1], refY, refX);
+			float slopeMin = 0.1;
+			float slope = abs(in[mid] - refY) / abs(in[mid - 1] - refX);
+			if (slope >= slopeMin) return mid;
+		}
+		if (in[mid] < refY || (in[mid] == refY && in[mid - 1] < refX)) return binarySearch(in, left, mid - 1, errorX, errorY, refX, refY);
+		else return binarySearch(in, mid + 1, right, errorX, errorY, refX, refY);
+	}
+	return -1;
+}
+
 __global__ void findVerts(int* in, int* out, int size, int width, int height) {
-	const int errorY = 2, errorX = 2;
+	const int errorY = 5, errorX = 5;
 	const int i = 2 * (blockIdx.x * blockDim.x + threadIdx.x); // xCoord
 	if (i > size) return;
 	if (i == 0) if (abs(in[i + 1] - in[i + 3]) > errorY) return; // drop isolated points if any
 	if (i == size - 2) if (abs(in[i-1] - in[i+1]) > errorY) return;
 	else if (abs(in[i+1] - in[i+3])>errorY || abs(in[i-1] - in[i+1]) > errorY) return;
-	// run binary search for point on X
-	int left = 0, right = size - 2, mid;
-	while (left <= right) {
-		mid = (left + right) / 2; // xCoord 
-		if (abs(in[mid] - in[i]) < errorX) {
-				out[i] = in[mid];
-				out[i + 1] = in[mid + 1];
-		}
-		if (in[mid] < in[i]) left = mid + 1;
-		else right = mid - 1;
+	int mid = binarySearch(in, 0, size - 1, errorX, errorY, in[i], in[i + 1]);
+	if (mid != -1) {
+		out[i] = in[mid - 1]; 
+		out[i + 1] = in[mid];
 	}
 }
 void Frame::processFrame(Mat frame) {
