@@ -43,8 +43,9 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 }
 __device__ int binarySearch(int* in, int left, int right, int errorX, int errorY, int refX, int refY) {
 	if (right >= left) {
-		int mid = ((left + right) / 2);
+		int mid = (left + right / 2);
 		if (mid % 2 == 0 && mid != right) mid++; // yCoord
+		if (mid > right || mid - 1 < left) return -1;
 		if (abs(in[mid] - refY) < errorY && abs(in[mid - 1] - refX) < errorX) {
 			printf("INSIDE\n");
 			printf("midY:%d, midX:%d, inY:%d, inX:%d\n", in[mid], in[mid - 1], refY, refX);
@@ -52,19 +53,21 @@ __device__ int binarySearch(int* in, int left, int right, int errorX, int errorY
 			float slope = abs(in[mid] - refY) / abs(in[mid - 1] - refX);
 			if (slope >= slopeMin) return mid;
 		}
-		if (in[mid] < refY || (in[mid] == refY && in[mid - 1] < refX)) return binarySearch(in, left, mid - 1, errorX, errorY, refX, refY);
-		else return binarySearch(in, mid + 1, right, errorX, errorY, refX, refY);
+		if (in[mid] < refY || (in[mid] == refY && in[mid - 1] < refX)) return binarySearch(in, mid + 1, right, errorX, errorY, refX, refY);
+		else return binarySearch(in, left, mid - 1, errorX, errorY, refX, refY);
 	}
 	return -1;
 }
 
-__global__ void findVerts(int* in, int* out, int size, int width, int height) {
+__global__ void findVerts(int* in, int* out, int size) {
 	const int errorY = 5, errorX = 5;
 	const int i = 2 * (blockIdx.x * blockDim.x + threadIdx.x); // xCoord
-	if (i > size) return;
-	if (i == 0) if (abs(in[i + 1] - in[i + 3]) > errorY) return; // drop isolated points if any
-	if (i == size - 2) if (abs(in[i-1] - in[i+1]) > errorY) return;
-	else if (abs(in[i+1] - in[i+3])>errorY || abs(in[i-1] - in[i+1]) > errorY) return;
+	if (i >= size) return;
+	if (i == 0) return;
+		//if (abs(in[i + 1] - in[i + 3]) > errorY) return; // drop isolated points if any
+	else if (i == size - 2) return;
+		//if (abs(in[i-1] - in[i+1]) > errorY) return;
+	else if (abs(in[i+1] - in[i+3]) > errorY || abs(in[i-1] - in[i+1]) > errorY) return;
 	int mid = binarySearch(in, 0, size - 1, errorX, errorY, in[i], in[i + 1]);
 	if (mid != -1) {
 		out[i] = in[mid - 1]; 
@@ -99,7 +102,8 @@ void Frame::processFrame(Mat frame) {
 	if (asyncErrPL != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrPL), cudaGetErrorString(asyncErrPL)); throw invalid_argument("Async Kernel Error"); }
 
 	for (int i = 0; i < 3*N; i++) if (hostOutPL[i] != 0) pointList.push_back(hostOutPL[i]);
-	
+
+	free(hostOutPL);
 	cudaFree(inPL);
 	cudaFree(outPL);
 
@@ -115,7 +119,7 @@ void Frame::processFrame(Mat frame) {
 	//change pointlist vect to thrust::device_vector to prevent this copy? 
 	for (int i = 0; i < pointList.size(); i++) inVL[i] = pointList.at(i); // O(n)
 
-	findVerts << <(pointList.size() + 32 - 1) / 32, 32 >> > (inVL, outVL, pointList.size(), frame.cols, frame.rows);
+	findVerts << <(pointList.size() + 32 - 1) / 32, 32 >> > (inVL, outVL, pointList.size());
 
 	int* hostOutVL = (int*)calloc(pointList.size(), sizeof(int));
 	cudaMemcpy(hostOutVL, outVL, pointList.size() * sizeof(int), cudaMemcpyDeviceToHost);
@@ -127,6 +131,7 @@ void Frame::processFrame(Mat frame) {
 
 	for (int i = 0; i < pointList.size(); i++) if (hostOutVL[i] != 0) vertList.push_back(hostOutVL[i]);
 
+	free(hostOutVL);
 	cudaFree(inVL);
 	cudaFree(outVL);
 	
