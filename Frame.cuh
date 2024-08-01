@@ -10,8 +10,8 @@ using cv::Mat;
 using namespace std;
 class Frame {
 	public:
-		vector <int> pointList;
-		vector <int> vertList;
+		int* pointList;
+		int* vertList;
 
 		Frame(Mat frame);
 		void processFrame(Mat frame);
