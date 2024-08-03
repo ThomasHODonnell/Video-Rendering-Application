@@ -10,4 +10,4 @@
 - The OpenCV code is tentativly finished. OpenCV currently reads frames from a video file, places the pixel data in data structures / containers for use in both the CUDA kernels and neural network(s).
 - I am currently desiging and validating logic based CUDA kernels in the 3D real-world domain. I have found object outlines / verticies in the 2D domain, so all that's left is to plot all of these points to scale! I intend to post a more thourough README upon further progress when I have more concrete information.
 
-![alt text](https://github.com/ThomasHODonnell/Video-Rendering-Application/tree/master/Images/8.3.24.png)
+![alt text](Images/8.3.24.png)
