@@ -15,7 +15,7 @@ class Frame {
 
 		Frame(Mat frame);
 		void processFrame(Mat frame);
-		void printLists(); 
+		void printLists();
 };
 	
 #endif

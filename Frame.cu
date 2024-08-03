@@ -4,6 +4,7 @@
 #include <opencv2/core/cuda.hpp>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <stdlib.h>
 #include <iostream>
 #include <cmath>
 #include <vector>
@@ -33,9 +34,9 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 			if (j == 0 && k == 0) continue;
 			int neighborIdx = i + 3 * (j * width + k);
 			if (neighborIdx >= 0 && neighborIdx < width * height * 3)
-				if (abs(in[neighborIdx] - in[i]) >= 50 ||
-					abs(in[neighborIdx + 1] - in[i + 1]) >= 50 ||
-					abs(in[neighborIdx + 2] - in[i + 2]) >= 50)
+				if (abs(in[neighborIdx] - in[i]) >= 5 ||
+					abs(in[neighborIdx + 1] - in[i + 1]) >= 5 ||
+					abs(in[neighborIdx + 2] - in[i + 2]) >= 5)
 					out[(i / 3) * 2] = 1; // 0 - N-1 indexed, return more information? 
 				else out[(i / 3) * 2] = 0; 
 		}
@@ -83,11 +84,10 @@ __global__ void findVerts(int* in, int* out, int size) {
 void Frame::processFrame(Mat frame) {
 	Vec3b data;
 	int* inPL = 0;
-	int* outPL = 0; 
 
 	cudaError_t inMalErrPL = cudaMallocManaged(&inPL, 3 * N * sizeof(int)); // RGB * N
 	if (inMalErrPL != cudaSuccess) { printf("Input Array Malloc Error: code %d - %s.\n", cudaError(inMalErrPL), cudaGetErrorString(inMalErrPL)); return; }
-	cudaError_t outMalErrPL = cudaMalloc(&outPL, 2 * N * sizeof(int));
+	cudaError_t outMalErrPL = cudaMallocManaged(&pointList, 2 * N * sizeof(int)); // X, Y * N
 	if (outMalErrPL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrPL), cudaGetErrorString(outMalErrPL)); return; }
 
 	for (int i = 0; i < N; i += 3) { // can this be done faster??
@@ -96,10 +96,7 @@ void Frame::processFrame(Mat frame) {
 			inPL[i + j] = static_cast<int>(data[j]);
 	}
 	
-	findPoints<<<dimGrid, dimBlock>>>(inPL, outPL, frame.cols, frame.rows);
-
-	pointList = (int*)malloc(2 * N * sizeof(int)); // X,Y * N
-	cudaMemcpy(pointList, outPL, 2 * N * sizeof(int), cudaMemcpyDeviceToHost);
+	findPoints<<<dimGrid, dimBlock>>>(inPL, pointList, frame.cols,  frame.rows);
 
 	cudaError_t syncErrPL = cudaGetLastError();
 	cudaError_t asyncErrPL = cudaDeviceSynchronize();
@@ -107,41 +104,34 @@ void Frame::processFrame(Mat frame) {
 	if (asyncErrPL != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrPL), cudaGetErrorString(asyncErrPL)); throw invalid_argument("Async Kernel Error"); }
 
 	cudaFree(inPL);
-	cudaFree(outPL);
 
-	int* outVL = 0;
+	cudaError_t vlMalErr = cudaMalloc(&vertList, 2 * N * sizeof(int));
+	if (vlMalErr != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(vlMalErr), cudaGetErrorString(vlMalErr)); return; }
 
-	cudaError_t outMalErrVL = cudaMalloc(&outVL, 2 * N * sizeof(int));
-	if (outMalErrVL != cudaSuccess) { printf("Output Array Malloc Error: code %d - %s.\n", cudaError(outMalErrVL), cudaGetErrorString(outMalErrVL)); return; }
+	findVerts << <(2 * N + TPB - 1) / TPB, TPB >> > (pointList, vertList, 2 * N);
 
-	findVerts << <(2 * N + 32 - 1) / 32, 32 >> > (pointList, outVL, 2 * N);
-
-	vertList = (int*)malloc(2 * N * sizeof(int));
-	cudaMemcpy(vertList, outVL, 2 * N * sizeof(int), cudaMemcpyDeviceToHost);
-
-	cudaError_t syncErrVL = cudaGetLastError();
-	cudaError_t asyncErrVL = cudaDeviceSynchronize();
- 	if (syncErrVL != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrVL), cudaGetErrorString(syncErrVL)); throw invalid_argument("Sync Kernel Error"); }
-	if (asyncErrVL != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrVL), cudaGetErrorString(asyncErrVL)); throw invalid_argument("Async Kernel Error"); }
+	cudaError_t syncErrvertList = cudaGetLastError();
+	cudaError_t asyncErrvertList = cudaDeviceSynchronize();
+ 	if (syncErrvertList != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrvertList), cudaGetErrorString(syncErrvertList)); throw invalid_argument("Sync Kernel Error"); }
+	if (asyncErrvertList != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrvertList), cudaGetErrorString(asyncErrvertList)); throw invalid_argument("Async Kernel Error"); }
 
 	Vec3b yel = { 255, 255, 0 };
-	for (int i = 0; i < 2 * N; i++) 
-		if (vertList[i] != 0) 
+	Vec3b black = { 1, 1, 1 };
+	for (int i = 0; i < 2 * N; i++) {
+		if (pointList[i] != 0)
 			frame.at<Vec3b>(Point(i % 1080, i / 1080)) = yel;
-	
-	imshow("Vert List Output", frame);
+		//else
+			//frame.at<Vec3b>(Point(i % 1080, i / 1080)) = black;
+	}
 
-	cudaFree(outVL);
-	
-	printLists(); 
-
-	free(pointList);
-	free(vertList);
+	imshow("PL Output", frame);
+	 	
+	//printLists(); 
 }
 void Frame::printLists() {
 	cout << "----------------------------------------------------------------------------------------------\n";
 	cout << "POINT LIST: " << 2 * N << " elements\n{";
-	for (int i = 0; i < 2 * N; i+=2) {
+	for (int i = 0; i < N; i+=2) {
 		if (i != 0) cout << ", ";
 		cout << "(";
 		cout << pointList[i]%1080 << ", " << pointList[i + 1]/1080;
@@ -149,7 +139,7 @@ void Frame::printLists() {
 	}
 	cout << "}\n----------------------------------------------------------------------------------------------\n";
 	cout << "VERTICE LIST: " << 2 * N << " elements\n{";
-	for (int i = 0; i < 2 * N; i += 2) {
+	for (int i = 0; i < N; i += 2) {
 		if (i != 0) cout << ", ";
 		cout << "(";
 		cout << vertList[i] % 1080 << ", " << vertList[i + 1] / 1080;
