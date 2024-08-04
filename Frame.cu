@@ -37,8 +37,8 @@ __global__ void findPoints(int* in, int* out, int width, int height) {
 				if (abs(in[neighborIdx] - in[i]) >= 5 ||
 					abs(in[neighborIdx + 1] - in[i + 1]) >= 5 ||
 					abs(in[neighborIdx + 2] - in[i + 2]) >= 5)
-					out[(i / 3) * 2] = 1; // 0 - N-1 indexed, return more information? 
-				else out[(i / 3) * 2] = 0; 
+					out[(i/3)*2] = 1; // 0 - 2*N-1 indexed, return more information? 
+				else out[(i/3)*2] = 0; 
 		}
 	}
 }
@@ -115,18 +115,19 @@ void Frame::processFrame(Mat frame) {
  	if (syncErrvertList != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrvertList), cudaGetErrorString(syncErrvertList)); throw invalid_argument("Sync Kernel Error"); }
 	if (asyncErrvertList != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrvertList), cudaGetErrorString(asyncErrvertList)); throw invalid_argument("Async Kernel Error"); }
 
+	Mat output(frame.rows, frame.cols, CV_8UC3, Scalar(0, 0, 0));
+
 	Vec3b yel = { 255, 255, 0 };
-	Vec3b black = { 1, 1, 1 };
-	for (int i = 0; i < 2 * N; i++) {
-		if (pointList[i] != 0)
-			frame.at<Vec3b>(Point(i % 1080, i / 1080)) = yel;
-		//else
-			//frame.at<Vec3b>(Point(i % 1080, i / 1080)) = black;
+	int x, y; 
+	for (int i = 0; i < 2 * N; i += 2) {
+		x = (i/2 % frame.cols) * 3;
+		y = (i/2 / frame.cols) * 2 * 1.33;  
+		if (pointList[i] != 0 && x < frame.cols && y < frame.rows)
+			output.at<Vec3b>(Point(x, y)) = yel;
 	}
 
-	imshow("PL Output", frame);
+	imshow("PL Output", output);
 	 	
-	//printLists(); 
 }
 void Frame::printLists() {
 	cout << "----------------------------------------------------------------------------------------------\n";
