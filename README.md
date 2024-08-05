@@ -8,7 +8,8 @@
 - Finally, a series of neural networks will be implemented to find points that the logic based CUDA kernels missed and pass the newfound data to OpenGL. 
 ## Progress
 - The OpenCV code is tentativly finished. OpenCV currently reads frames from a video file, places the pixel data in data structures / containers for use in both the CUDA kernels and neural network(s).
-- I am currently desiging and validating logic based CUDA kernels in the 3D real-world domain. I have found object outlines / verticies in the 2D domain, so all that's left is to plot all of these points to scale! I intend to post a more thourough README upon further progress when I have more concrete information.
+- I have recently finished / validated logic based CUDA kernels in the 2D and 3D real-world domain. 
+- I am currently transfering the second screenshot below over to a virtual 3D space rendered by GLFW. Once, I can replay the primary objects in real-time there, all that's left is to plot the video around a central axis point and implement neural networks to detect the primary objects in the video! 
 
 ## First Frame Input
 ![alt text](Images/VideoInput.png)
