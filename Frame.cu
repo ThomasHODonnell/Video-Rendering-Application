@@ -8,9 +8,9 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
+#include <stdlib.h>
 #include "Frame.cuh"
 #include "Video.cuh"
-#include "processingFunc.cuh"
 
 using namespace cv;
 using namespace std;
@@ -20,14 +20,16 @@ const int GRIDSIZE = (N + TPB - 1) / TPB;
 dim3 dimGrid = dim3(GRIDSIZE);
 dim3 dimBlock = dim3(TPB);
 
-Frame::Frame(Mat frame) {
-	processFrame(frame);
-}
+int MAXPT = 0, MINPT = -1; 
+
+Frame::Frame() {}
+
 __global__ void findPoints(int* in, int* out, int width, int height) {
 	const int i = 3 * (blockIdx.x * blockDim.x + threadIdx.x);
 	int xCoord = (i / 3) % width;
 	int yCoord = (i / 3) / width;
 	if (xCoord == 0 || xCoord == width - 1 || yCoord == 0 || yCoord == height - 1) return;
+	//MAXPT = 5; 
 
 	for (int j = -1; j <= 1; j++) {
 		for (int k = -1; k <= 1; k++) {
@@ -115,6 +117,8 @@ void Frame::processFrame(Mat frame) {
  	if (syncErrvertList != cudaSuccess) { printf("Sync Kernel Error: code %d - %s.\n", cudaError(syncErrvertList), cudaGetErrorString(syncErrvertList)); throw invalid_argument("Sync Kernel Error"); }
 	if (asyncErrvertList != cudaSuccess) { printf("Async Kernel Error: code %d - %s.\n", cudaError(asyncErrvertList), cudaGetErrorString(asyncErrvertList)); throw invalid_argument("Async Kernel Error"); }
 
+	getVerts(); 
+	
 	Mat output(frame.rows, frame.cols, CV_8UC3, Scalar(0, 0, 0));
 
 	Vec3b yel = { 255, 255, 0 };
@@ -127,7 +131,29 @@ void Frame::processFrame(Mat frame) {
 	}
 
 	imshow("PL Output", output);
-	 	
+	
+}
+float Frame::domainFlip(int alpha, int max, int min) { return 2 * ((alpha - min) / (max - min)) - 1; }
+
+GLfloat* Frame::getVerts() {
+	int maxPos = 0, minPos = 2*N, size = 0; 
+	vector<int> points; 
+	for (int i = 0; i < 2 * N; i += 2) {
+		if (pointList[i] != 0) {
+			if (i > maxPos) maxPos = i; 
+			if (i < minPos) minPos = i; 
+			size++;
+			points.push_back(i);
+		}
+	}
+	GLfloat* verts = (GLfloat*)malloc(size * 3 * sizeof(GLfloat));
+	int index = 0; 
+	for (int i = 0; i < points.size() ; i++, index++) {
+			verts[index] = domainFlip(points.at(i) % 1080, maxPos, minPos);
+			verts[++index] = domainFlip(points.at(i) / 1080, maxPos, minPos);
+			verts[++index] = 0.0f;
+	}
+	return verts; 
 }
 void Frame::printLists() {
 	cout << "----------------------------------------------------------------------------------------------\n";
